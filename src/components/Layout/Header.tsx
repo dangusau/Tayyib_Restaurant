@@ -19,7 +19,7 @@ export default function Header({ onMenuClick }: { onMenuClick: () => void }) {
         </button>
 
         <img src="/tayyib.jpg" alt="Logo" className="h-8 w-auto hidden sm:block" />
-        <h1 className="text-lg font-semibold text-primary">Tayyib</h1>
+        <h1 className="text-lg font-semibold text-primary">Tayyib Finance Dashboard</h1>
       </div>
 
       <div className="flex items-center gap-4">
