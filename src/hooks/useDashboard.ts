@@ -25,7 +25,6 @@ export function useDashboardData(filters: DashboardFilters) {
         setCategories(c);
         setCumulativeData(cum);
 
-        // Always fetch previous period for % change
         const { start, end } = dashboardService.getPreviousPeriodDates(filters);
         const prev = await dashboardService.getMetrics({ ...filters, startDate: start, endDate: end });
         setPrevMetrics(prev);
