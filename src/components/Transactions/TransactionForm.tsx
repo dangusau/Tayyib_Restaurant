@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
@@ -16,6 +16,7 @@ interface FormData {
   notes: string;
   purchase_items: PurchaseItem[];
   expenses: Expense[];
+  cash_balance: number;
 }
 
 const UNITS: UnitType[] = ['pieces', 'kg', 'carton', 'dozen', 'pack'];
@@ -28,7 +29,6 @@ export default function TransactionForm() {
   const isMD = user?.role === 'MD';
 
   const [initialLoading, setInitialLoading] = useState(true);
-  const balanceLoaded = useRef(false); // guard against multiple fetches
 
   const { register, control, handleSubmit, watch, setValue, reset } = useForm<FormData>({
     defaultValues: {
@@ -40,14 +40,14 @@ export default function TransactionForm() {
       notes: '',
       purchase_items: [],
       expenses: [],
+      cash_balance: 0,
     },
   });
 
   const { fields: itemFields, append: addItem, remove: removeItem, replace: replaceItems } = useFieldArray({ control, name: 'purchase_items' });
   const { fields: expenseFields, append: addExpense, remove: removeExpense, replace: replaceExpenses } = useFieldArray({ control, name: 'expenses' });
 
-  // Reliably fetch the last cash balance
-  const loadLastBalance = async () => {
+  const loadLastBalance = useCallback(async () => {
     if (!user?.restaurant_id) return;
     const { data } = await supabase
       .from('transactions')
@@ -58,8 +58,8 @@ export default function TransactionForm() {
       .limit(1);
     const lastBalance = (data as any)?.[0]?.cash_balance ?? 0;
     setValue('previous_balance', lastBalance);
-    balanceLoaded.current = true;
-  };
+    setValue('cash_balance', lastBalance);
+  }, [user?.restaurant_id, setValue]);
 
   useEffect(() => {
     async function init() {
@@ -86,33 +86,41 @@ export default function TransactionForm() {
           notes: t.notes || '',
           purchase_items: t.purchase_items || [],
           expenses: t.expenses || [],
+          cash_balance: t.cash_balance,
         });
         replaceItems(t.purchase_items || []);
         replaceExpenses(t.expenses || []);
       } else {
         if (!isMD) addItem({ item_name: '', quantity: 0, unit: 'pieces', unit_price: 0 });
         addExpense({ description: '', amount: 0, category: 'supplies' });
-        await loadLastBalance(); // only for new entries
+        await loadLastBalance();
       }
       setInitialLoading(false);
     }
     init();
-  }, [id, isEdit, reset, navigate, isMD, addItem, addExpense, replaceItems, replaceExpenses]);
+  }, [id, isEdit, reset, navigate, isMD, addItem, addExpense, replaceItems, replaceExpenses, loadLastBalance]);
 
   const purchaseTotal = watch('purchase_items').reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0);
   const expenseTotal = watch('expenses').reduce((sum, exp) => sum + (exp.amount || 0), 0);
   const totalSpent = purchaseTotal + expenseTotal;
 
-  // Show expected cash balance before submitting
-  const cashReceived = isMD ? totalSpent : watch('cash_received');
-  const prevBalance = watch('previous_balance');
-  const expectedCashBalance = cashReceived + prevBalance - totalSpent;
+  const prevBal = watch('previous_balance');
+  const cashReceivedVal = watch('cash_received');
+
+  // Update cash balance when fields change
+  useEffect(() => {
+    if (isMD) {
+      setValue('cash_balance', prevBal);
+    } else {
+      setValue('cash_balance', prevBal + (cashReceivedVal || 0));
+    }
+  }, [prevBal, cashReceivedVal, isMD, setValue]);
 
   const onSubmit = async (data: FormData) => {
     if (!user) return;
     try {
       const posTotal = isMD ? -totalSpent : data.pos_total;
-      const cashReceived = isMD ? totalSpent : data.cash_received;
+      const cashReceived = isMD ? 0 : data.cash_received;   // <-- key change
 
       const transactionData = {
         restaurant_id: user.restaurant_id,
@@ -123,6 +131,7 @@ export default function TransactionForm() {
         previous_balance: data.previous_balance,
         total_spent: totalSpent,
         notes: data.notes,
+        cash_balance: data.cash_balance,
         created_by: user.id,
       };
 
@@ -146,17 +155,15 @@ export default function TransactionForm() {
 
       if (!txnId) throw new Error('Could not determine transaction ID');
 
-      // Clear old items/expenses if editing
       if (isEdit) {
         await supabase.from('purchase_items').delete().eq('transaction_id', txnId);
         await supabase.from('expenses').delete().eq('transaction_id', txnId);
       }
 
-      // Purchase items (Manager only)
       if (!isMD) {
         const items = data.purchase_items
-          .filter((i) => i.item_name && i.quantity > 0 && i.unit_price > 0)
-          .map((i) => ({
+          .filter(i => i.item_name && i.quantity > 0 && i.unit_price > 0)
+          .map(i => ({
             transaction_id: txnId,
             item_name: i.item_name,
             quantity: i.quantity,
@@ -166,10 +173,9 @@ export default function TransactionForm() {
         if (items.length > 0) await supabase.from('purchase_items').insert(items as any);
       }
 
-      // Expenses (always)
       const expenses = data.expenses
-        .filter((e) => e.description && e.amount > 0)
-        .map((e) => ({
+        .filter(e => e.description && e.amount > 0)
+        .map(e => ({
           transaction_id: txnId,
           description: e.description,
           amount: e.amount,
@@ -198,18 +204,16 @@ export default function TransactionForm() {
         {isEdit ? 'Edit' : 'New'} {isMD ? 'Expense' : 'Transaction'}
       </h2>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 bg-white p-6 rounded-lg shadow">
-        {/* Date */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm">Date</label>
             <input type="date" {...register('transaction_date', { required: true })} className="border rounded px-2 py-1 w-full" />
           </div>
 
-          {/* Manager fields */}
           {!isMD && (
             <>
               <div>
-                <label className="block text-sm">POS Total</label>
+                <label className="block text-sm">POS Total (Card/Transfer)</label>
                 <input type="number" step="1" min="0" {...register('pos_total', { valueAsNumber: true, required: true })} className="border rounded px-2 py-1 w-full" />
               </div>
               <div>
@@ -217,13 +221,12 @@ export default function TransactionForm() {
                 <input type="number" step="1" min="0" {...register('meal_tickets', { valueAsNumber: true })} className="border rounded px-2 py-1 w-full" />
               </div>
               <div>
-                <label className="block text-sm">Cash Received</label>
+                <label className="block text-sm">Cash Received (Physical Cash)</label>
                 <input type="number" step="1" min="0" {...register('cash_received', { valueAsNumber: true })} className="border rounded px-2 py-1 w-full" />
               </div>
             </>
           )}
 
-          {/* Previous Balance – read‑only */}
           <div>
             <label className="block text-sm">Previous Balance</label>
             <input
@@ -238,9 +241,18 @@ export default function TransactionForm() {
             <label className="block text-sm">Notes</label>
             <input {...register('notes')} className="border rounded px-2 py-1 w-full" />
           </div>
+          <div>
+            <label className="block text-sm">Cash Balance (Till After Entry)</label>
+            <input
+              type="number"
+              step="1"
+              {...register('cash_balance', { valueAsNumber: true })}
+              className="border rounded px-2 py-1 w-full bg-gray-100"
+              readOnly
+            />
+          </div>
         </div>
 
-        {/* Purchase Items – Manager only */}
         {!isMD && (
           <div>
             <h3 className="font-semibold">Purchase Items</h3>
@@ -249,7 +261,7 @@ export default function TransactionForm() {
                 <input {...register(`purchase_items.${index}.item_name`, { required: true })} placeholder="Item name" className="border rounded px-2 py-1 flex-1 min-w-[120px]" />
                 <input type="number" step="0.001" min="0" {...register(`purchase_items.${index}.quantity`, { valueAsNumber: true, required: true })} placeholder="Qty" className="border rounded px-2 py-1 w-20" />
                 <select {...register(`purchase_items.${index}.unit`)} className="border rounded px-2 py-1">
-                  {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
                 <input type="number" step="1" min="0" {...register(`purchase_items.${index}.unit_price`, { valueAsNumber: true, required: true })} placeholder="Price" className="border rounded px-2 py-1 w-24" />
                 <span className="text-sm text-gray-600">Total: ₦{((field.quantity || 0) * (field.unit_price || 0)).toLocaleString()}</span>
@@ -260,7 +272,6 @@ export default function TransactionForm() {
           </div>
         )}
 
-        {/* Expenses */}
         <div>
           <h3 className="font-semibold">{isMD ? 'Expenses' : 'Other Expenses'}</h3>
           {expenseFields.map((field, index) => (
@@ -287,14 +298,12 @@ export default function TransactionForm() {
           <button type="button" onClick={() => addExpense({ description: '', amount: 0, category: 'supplies' })} className="text-primary text-sm hover:underline">+ Add Expense</button>
         </div>
 
-        {/* Expected cash balance */}
         <div className="text-right space-y-1">
           <div className="font-bold">Total Spent: ₦{totalSpent.toLocaleString()}</div>
           <div className="text-sm text-gray-600">
             {isMD
-              ? `Cash balance will remain unchanged at ₦${prevBalance.toLocaleString()}`
-              : `Expected Cash Balance: ₦${expectedCashBalance.toLocaleString()}`
-            }
+              ? 'Cash balance unchanged (expense deducted from POS)'
+              : `Cash Balance = Previous Balance + Cash Received`}
           </div>
         </div>
 
