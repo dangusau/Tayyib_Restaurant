@@ -25,12 +25,11 @@ export const dashboardService = {
       totalMealTickets: Number(d.totalMealTickets ?? 0),
       averageDailyTickets: Number(d.averageDailyTickets ?? 0),
       totalCashReceived: Number(d.totalCashReceived ?? 0),
+      totalPOS: Number(d.totalPOS ?? 0),
       currentCashBalance: Number(d.currentCashBalance ?? 0),
       revenueChange: Number(d.revenueChange ?? 0),
       expenseChange: Number(d.expenseChange ?? 0),
       profitChange: Number(d.profitChange ?? 0),
-      averageMealTicketPrice: 1200, // constant, kept for backward compatibility
-      totalPOS: Number(d.totalpos ?? d.totalPOS ?? 0),
     };
   },
 
