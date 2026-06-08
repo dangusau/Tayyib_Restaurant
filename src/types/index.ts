@@ -5,7 +5,7 @@ export interface User {
   email: string;
   full_name: string;
   role: UserRole;
-  restaurant_id: string | null;   // <-- was `string`, now nullable
+  restaurant_id: string;
   avatar_url?: string;
   phone?: string;
   is_active: boolean;
@@ -73,14 +73,13 @@ export interface DashboardMetrics {
   averageDailyExpenses: number;
   averageDailyProfit: number;
   totalMealTickets: number;
-  averageMealTicketPrice: number;
+  averageDailyTickets: number;
+  totalCashReceived: number;
+  totalPOS: number;
   currentCashBalance: number;
   revenueChange: number;
   expenseChange: number;
   profitChange: number;
-  averageDailyTickets: number;        // new
-  totalCashReceived: number;          // new
-  totalPOS: number;  
 }
 
 export interface DailyDataPoint {
@@ -101,20 +100,20 @@ export interface CategoryBreakdown {
 
 export type GroupBy = 'day' | 'month' | 'quarter' | 'year';
 
-export interface DashboardFilters {
-  startDate: string;
-  endDate: string;
-  groupBy: GroupBy;
-  restaurantId: string;
-  compareWith?: 'previous';
-  excludeWeekends?: boolean;
-  categoryFilter?: string[];
-  createdBy?: string;
-}
-
 export interface CumulativeDataPoint {
   period: string;
   cumulativeRevenue: number;
   cumulativeExpenses: number;
   cumulativeProfit: number;
+}
+
+export interface DashboardFilters {
+  startDate: string;
+  endDate: string;
+  groupBy: GroupBy;
+  restaurantId: string;
+  compareWith?: 'previous' | 'lastYear';
+  excludeWeekends?: boolean;
+  categoryFilter?: string[];
+  createdBy?: string;
 }
